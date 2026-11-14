@@ -1,0 +1,11 @@
+# Core (data + inspection). Training deps are installed in the Colab notebook.
+datasets>=2.19
+pillow>=10.0
+numpy>=1.26
+pandas>=2.0
+matplotlib>=3.8
+pyyaml>=6.0
+tqdm>=4.66
+
+# Dev
+pytest>=8.0

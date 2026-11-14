@@ -1,0 +1,60 @@
+# ---- Python ----
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+.ipynb_checkpoints/
+
+# ---- Data (large, re-downloadable with scripts/) ----
+data/*
+!data/.gitkeep
+
+# ---- Training outputs and model weights ----
+outputs/*
+!outputs/.gitkeep
+runs/
+wandb/
+lightning_logs/
+tensorboard/
+*.pt
+*.pth
+*.ckpt
+*.onnx
+*.safetensors
+*.h5
+*.tflite
+*.parquet
+*.zip
+*.tar
+*.tar.gz
+
+# ---- Your own test photos / recordings ----
+own_test/
+*.mp4
+*.mov
+*.wav
+
+# ---- Logs ----
+*.log
+
+# ---- Editor / OS ----
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ---- Secrets (never commit) ----
+.env
+.env.*
+*.key
+hf_token*

@@ -1,0 +1,6 @@
+dataset:
+  hf_repo: j-asra-j/guitar-chords
+  raw_dir: data/raw          # HF cache / downloaded parquet
+  report_dir: outputs/dataset_report
+  seed: 42
+  preview_samples_per_class: 4
