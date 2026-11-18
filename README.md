@@ -24,6 +24,10 @@ notebooks/02_fretboard_detection.ipynb   Phase 2: classical OpenCV fretboard det
 scripts/make_fretboard_notebook.py       regenerates the Phase 2 notebook
 notebooks/03_fingertip_fret_mapping.ipynb  Phase 3: map MediaPipe fingertips onto the Phase 2 fretboard (Colab)
 scripts/make_mapping_notebook.py         regenerates the Phase 3 notebook (copies the Phase 2 detector out of notebook 02)
+notebooks/04a_extract_features.ipynb     Phase 4a: run Phases 1-3 over the whole dataset -> feature table (Colab, CPU, resumable)
+notebooks/04b_train_models.ipynb         Phase 4b: near-duplicate-safe split, CNN baseline + crop CNN, feature model, fusion (Colab, GPU)
+notebooks/04c_evaluate_and_demo.ipynb    Phase 4c: honest evaluation, own-photo test, live webcam demo (Colab)
+scripts/make_features_notebook.py, make_train_notebook.py, make_eval_notebook.py   regenerate the Phase 4 notebooks (run in that order)
 scripts/export_images.py                 dataset -> data/images/<split>/<chord>/*.jpg
 scripts/make_sample_zip.py               builds data/guitar_chords_sample.zip (upload this to Colab; no Drive needed)
 notebooks/train_colab.ipynb training + evaluation (run on Colab)

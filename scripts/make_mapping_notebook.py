@@ -554,7 +554,8 @@ def map_fingertip(model, p2, finger, tip, hand_score):
     P = np.array([tip['x_px'], tip['y_px']], float)
     r = dict(finger=finger, landmark_id=tip['id'], x_px=tip['x_px'], y_px=tip['y_px'], proximity_only=True,
              status='no_geometry', decision='rejected', reason='', string_index=None, string_position=None,
-             string_margin=None, fret_slot=None, fret_number=None, fret_margin=None, confidence=0.0, snap_xy=None)
+             string_margin=None, fret_slot=None, fret_number=None, fret_margin=None, fret_frac=None, neck_coord=None,
+             confidence=0.0, snap_xy=None)
     if model is None:
         r['reason'] = f"Phase 2 found no usable strings ({p2.get('failure_reason')})"
         return r
@@ -585,7 +586,9 @@ def map_fingertip(model, p2, finger, tip, hand_score):
         status = 'mapped' if (s_ok and f_ok) else 'ambiguous_both' if (not s_ok and not f_ok) else 'ambiguous_string' if not s_ok else 'ambiguous_fret'
         f_clear = float(np.clip(2 * f['margin'], 0, 1)) * (0.5 if f['virtual_edge'] else 1.0)
         r.update(fret_slot=f['slot'], fret_margin=round(f['margin'], 2),
-                 fret_number=f['slot'] if model['nut_conf'] == 'medium' else None)
+                 fret_number=f['slot'] if model['nut_conf'] == 'medium' else None,
+                 fret_frac=round(f['frac'], 3),                       # 0 = on the headstock-side line, 1 = on the body-side line
+                 neck_coord=round(f['slot'] - 1 + f['frac'], 3))      # continuous position along the neck, in fret-region units
     gq = MAPCFG['geometry_quality'].get(p2.get('confidence'), 0.3)
     conf = gq * hand_score * float(np.sqrt(np.clip(s['margin'], 0, 1) * f_clear))
     r.update(status=status, confidence=round(float(conf), 3), snap_xy=[round(float(v), 1) for v in snap_to_string(model, P, s['index'])])
@@ -604,13 +607,17 @@ def map_fingertip(model, p2, finger, tip, hand_score):
     return r
 
 
-def map_image(image_id, bgr):
-    hands, p2 = HANDS[image_id], PHASE2[image_id]
+def map_image(image_id, bgr, hands, p2, p2_source='recompute', coord_problems=None):
+    # Everything this needs is passed in (no notebook globals), so other notebooks can call it per image.
     model = build_neck_model(p2)
     h_idx, n_other = select_fretting_hand(hands, model)
-    out = dict(schema_version=1, image=dict(id=image_id, width=bgr.shape[1], height=bgr.shape[0]),
-               phase1=dict(n_hands=len(hands['hands']), fretting_hand_index=h_idx, n_other_hands=n_other),
-               phase2=dict(source=P2_SRC[image_id], status=p2['status'], confidence=p2['confidence'], failure_reason=p2.get('failure_reason'),
+    bbox = None
+    if h_idx is not None:                                             # box around all 21 landmarks of the chosen hand
+        lm = np.array(hands['hands'][h_idx]['landmarks_px'])
+        bbox = [round(float(v), 1) for v in (lm[:, 0].min(), lm[:, 1].min(), lm[:, 0].max(), lm[:, 1].max())]
+    out = dict(schema_version=2, image=dict(id=image_id, width=bgr.shape[1], height=bgr.shape[0]),
+               phase1=dict(n_hands=len(hands['hands']), fretting_hand_index=h_idx, n_other_hands=n_other, hand_bbox=bbox),
+               phase2=dict(source=p2_source, status=p2['status'], confidence=p2['confidence'], failure_reason=p2.get('failure_reason'),
                            neck_angle_deg=p2.get('neck_angle_deg')),
                geometry=dict(usable=model is not None, n_fret_boundaries=0 if not model else len(model['boundaries']),
                              n_virtual_boundaries=0 if not model else model['n_virtual'],
@@ -618,7 +625,7 @@ def map_image(image_id, bgr):
                              nut_confidence=None if not model else model['nut_conf'],
                              string_index_convention='1..6 in Phase 2 order (one side of the neck to the other); NOT guitar tuning',
                              fret_slot_convention='1 = region after the first detected headstock-side line; fret_number only when a medium-confidence nut anchors it'),
-               coordinate_problems=COORD_PROBLEMS[image_id], fingertips=[], category='')
+               coordinate_problems=coord_problems or [], fingertips=[], category='')
     if h_idx is None:
         out['category'] = 'no_hand'
         return out, model
@@ -651,7 +658,7 @@ md(r"""
 code(r"""
 RESULTS, MODELS = {}, {}
 for image_id, bgr in IMAGES:
-    RESULTS[image_id], MODELS[image_id] = map_image(image_id, bgr)
+    RESULTS[image_id], MODELS[image_id] = map_image(image_id, bgr, HANDS[image_id], PHASE2[image_id], P2_SRC[image_id], COORD_PROBLEMS[image_id])
     (PH3 / 'mapping' / f'{image_id}.json').write_text(json.dumps(RESULTS[image_id], indent=1), encoding='utf-8')
 
 rows = []
