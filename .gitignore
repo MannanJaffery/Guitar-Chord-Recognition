@@ -58,3 +58,6 @@ desktop.ini
 .env.*
 *.key
 hf_token*
+
+# Local MCP config (contains machine-specific paths)
+.mcp.json

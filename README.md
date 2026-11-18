@@ -18,6 +18,14 @@ configs/dataset.yaml        dataset settings
 src/gcr/data.py             dataset loading
 scripts/inspect_dataset.py  download + quality report -> outputs/dataset_report/
 scripts/make_notebook.py    regenerates notebooks/train_colab.ipynb
+notebooks/01_hand_landmarks_colab.ipynb  Phase 1: MediaPipe hand + fingertip detection (Colab)
+scripts/make_hand_notebook.py            regenerates the Phase 1 notebook
+notebooks/02_fretboard_detection.ipynb   Phase 2: classical OpenCV fretboard detection (Colab)
+scripts/make_fretboard_notebook.py       regenerates the Phase 2 notebook
+notebooks/03_fingertip_fret_mapping.ipynb  Phase 3: map MediaPipe fingertips onto the Phase 2 fretboard (Colab)
+scripts/make_mapping_notebook.py         regenerates the Phase 3 notebook (copies the Phase 2 detector out of notebook 02)
+scripts/export_images.py                 dataset -> data/images/<split>/<chord>/*.jpg
+scripts/make_sample_zip.py               builds data/guitar_chords_sample.zip (upload this to Colab; no Drive needed)
 notebooks/train_colab.ipynb training + evaluation (run on Colab)
 data/, outputs/             git-ignored
 ```
@@ -28,6 +36,13 @@ python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
 .\.venv\Scripts\python.exe scripts/inspect_dataset.py
 ```
+
+## Using the sample zip in Colab (no Google Drive)
+```powershell
+.\.venv\Scripts\python.exe scripts/export_images.py        # once: writes data/images/
+.\.venv\Scripts\python.exe scripts/make_sample_zip.py       # writes data/guitar_chords_sample.zip (~24 MB, 20 photos per chord)
+```
+In the Phase 2 notebook, run the load cell and pick the zip in the file picker. At the end it downloads a results zip. Colab's disk is temporary, so download before closing.
 
 ## Train (Colab)
 1. Upload `notebooks/train_colab.ipynb` to Google Colab (File > Upload notebook), or open it from GitHub once pushed.
