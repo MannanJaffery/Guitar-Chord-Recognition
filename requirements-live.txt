@@ -1,0 +1,13 @@
+# Packages for the local live demo (scripts/live_local.py) and for running the notebook's code on your own machine.
+# The Colab/Kaggle notebook installs what it needs by itself; this file is only for a local Python environment.
+# For an NVIDIA GPU install the CUDA build of torch from https://pytorch.org instead of the plain `torch` line.
+torch
+torchvision
+opencv-python
+mediapipe
+scikit-learn
+scipy
+joblib
+numpy
+pandas
+matplotlib

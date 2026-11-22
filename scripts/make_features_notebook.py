@@ -125,12 +125,28 @@ SMOKE = True                # True: ~20 images per chord first; False: all 3,151
 SMOKE_PER_CLASS = 20
 N_WORKERS = 2               # parallel processes (Colab has 2 CPU cores); 1 = run in this process
 TIME_BUDGET_MIN = None      # e.g. 60 = stop after an hour, re-run the extraction cell to continue
+CHECKPOINT_EVERY = 500      # every this-many NEW images: save a partial zip and (on Colab) download it to your computer
+CHECKPOINT_DOWNLOAD = True  # False = only save the zip on the Colab disk (lost if Colab resets)
+RESUME_FROM_UPLOAD = False  # True = pick a partial p4_features*.zip from an earlier run so finished images are not redone
 SEED = 7
 
 P4 = Path(PROJECT_DIR) / 'outputs' / 'phase4'
 FEAT_DIR = P4 / 'features'
 FEAT_DIR.mkdir(parents=True, exist_ok=True)
 ZIP_PATH = f'{PROJECT_DIR}/data/guitar_chords_sample.zip'
+
+if RESUME_FROM_UPLOAD:                                       # restore finished images from an earlier (partial) run
+    from google.colab import files
+    print('Choose a partial p4_features*.zip from an earlier run ...')
+    restored = 0
+    for fname, data in files.upload().items():
+        if fname.lower().endswith('.zip'):
+            zp = P4 / fname; zp.write_bytes(data)
+            with zipfile.ZipFile(zp) as z:
+                for m in z.namelist():
+                    if m.startswith('features/') and m.endswith('.json'):
+                        (FEAT_DIR / Path(m).name).write_bytes(z.read(m)); restored += 1
+    print(f'restored {restored} finished images; the extraction below will skip them')
 
 DS = {}                      # split -> HF dataset (only for DATA_SOURCE='hf')
 ITEMS = []                   # one dict per image: id, chord, split, row (+ zip_name)
@@ -192,6 +208,7 @@ md(r"""
 **What:** `process_item` handles one image end to end and writes `outputs/phase4/features/<id>.json` containing the Phase 3 result, the full Phase 2 geometry, and the chord label.
 **Technique: multiprocessing.** `multiprocessing.Pool` starts 2 worker processes; each one loads its **own** MediaPipe model (these objects must not be shared between processes) and then takes images from a queue. `fork` is used so the workers inherit all the functions defined above.
 **Resumable:** a file is written only after the whole image is processed (written to a temporary name, then renamed), so a crash or disconnect never leaves a half-written file, and re-running skips finished images.
+**Protection against Colab resets (this really happened once):** Colab can recycle the machine and erase its disk with no warning, losing everything. So every `CHECKPOINT_EVERY` (500) new images the notebook saves a partial zip and **downloads it to your computer** (your browser may ask once to allow multiple downloads). If the machine is reset, set `RESUME_FROM_UPLOAD = True` in section 1, run it, and pick the newest partial zip: the finished images are restored and only the rest is processed.
 **Live progress:** a status line every few images: images done, speed, time left, and how the results are splitting into categories (`success`, `no_hand`, ...).
 """)
 code(r"""
@@ -243,7 +260,20 @@ def process_item(item):
     return item['id'], res['category'], time.time() - t0
 
 
-def run_extraction(items, n_workers=N_WORKERS, budget_min=TIME_BUDGET_MIN, every=10):
+def save_checkpoint():
+    # A partial results zip. Colab can reset the machine without warning and erases its disk, so we also download it.
+    n_done = len(list(FEAT_DIR.glob('*.json')))
+    zp = shutil.make_archive(str(Path(PROJECT_DIR) / f'p4_features_partial_{n_done:04d}'), 'zip', P4)
+    print(f'  checkpoint: {n_done} images -> {zp} ({os.path.getsize(zp) / 1e6:.1f} MB)', flush=True)
+    if CHECKPOINT_DOWNLOAD:
+        try:
+            from google.colab import files
+            files.download(zp)
+        except Exception as e:                                  # not on Colab / no browser attached: the zip is still on disk
+            print('  (browser download not started:', type(e).__name__, ')')
+
+
+def run_extraction(items, n_workers=N_WORKERS, budget_min=TIME_BUDGET_MIN, every=10, checkpoint_every=CHECKPOINT_EVERY):
     todo = [it for it in items if not (FEAT_DIR / f"{it['id']}.json").exists()]
     print(f'{len(items) - len(todo)} already done, {len(todo)} to do, {n_workers} worker(s)')
     if not todo:
@@ -261,6 +291,8 @@ def run_extraction(items, n_workers=N_WORKERS, budget_min=TIME_BUDGET_MIN, every
             if n % every == 0 or n == len(todo):
                 el = time.time() - t_start
                 print(f'[{n}/{len(todo)}] {el / 60:.1f} min elapsed, {el / n:.2f} s/image, ~{(len(todo) - n) * el / n / 60:.1f} min left | {counts}', flush=True)
+            if checkpoint_every and n % checkpoint_every == 0 and n < len(todo):
+                save_checkpoint()
             if budget_min and (time.time() - t_start) / 60 > budget_min:
                 print(f'time budget of {budget_min} min reached: re-run this cell to continue'); break
     finally:

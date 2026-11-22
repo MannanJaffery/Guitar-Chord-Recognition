@@ -28,6 +28,13 @@ notebooks/04a_extract_features.ipynb     Phase 4a: run Phases 1-3 over the whole
 notebooks/04b_train_models.ipynb         Phase 4b: near-duplicate-safe split, CNN baseline + crop CNN, feature model, fusion (Colab, GPU)
 notebooks/04c_evaluate_and_demo.ipynb    Phase 4c: honest evaluation, own-photo test, live webcam demo (Colab)
 scripts/make_features_notebook.py, make_train_notebook.py, make_eval_notebook.py   regenerate the Phase 4 notebooks (run in that order)
+notebooks/05_chord_recognizer_colab.ipynb  ONE self-contained Colab/Kaggle notebook: neck finder, finger-position features, 9-chord classifier, honest report, video + webcam demo (saves to Drive, resumable)
+scripts/make_colab_notebook.py           regenerates notebook 05 (copies its library code out of the three scripts below)
+scripts/package_for_colab.py             zips your videos + neck labels (+ neck_v1.pt) into artifacts/colab_upload/own_data.zip for upload
+scripts/label_neck.py                    local click tool: mark the 4 corners of the fretboard on frames
+scripts/live_local.py, live_pipeline.py  live chord recognition on your own laptop (webcam or video file); live_pipeline.py is shared with notebook 05
+requirements-live.txt                    packages for a local Python environment that runs the live script
+scripts/train_neck_detector.py, geometry_features.py, neck_structure.py   neck finder, hand-in-neck-coordinates features, strings/frets (library for notebook 05)
 scripts/export_images.py                 dataset -> data/images/<split>/<chord>/*.jpg
 scripts/make_sample_zip.py               builds data/guitar_chords_sample.zip (upload this to Colab; no Drive needed)
 notebooks/train_colab.ipynb training + evaluation (run on Colab)

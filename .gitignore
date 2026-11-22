@@ -61,3 +61,10 @@ hf_token*
 
 # Local MCP config (contains machine-specific paths)
 .mcp.json
+
+# ---- Trained models and Colab results downloaded from Google Colab (large, reproducible, not for git) ----
+artifacts/
+*.joblib
+
+# ---- Private project tracker (status, numbers, decisions, activity log) ----
+PROJECT_TRACKER.md
