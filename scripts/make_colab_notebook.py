@@ -46,15 +46,16 @@ def grab(path, names):
 
 S = ROOT / "scripts"
 LIB_NECK = grab(S / "train_neck_detector.py", ["IN_W", "IN_H", "MEAN", "STD", "NeckNet", "soft_argmax", "gaussian_target", "prep", "augment", "poly_iou", "predict"])
-LIB_GEO = grab(S / "geometry_features.py", ["TIPS", "FRET_TIPS", "UNIT", "NeckFinder", "neck_geometry", "HandFinder", "pick_fretting_hand", "neck_coords", "feature_vector", "frame_features"])
+LIB_GEO = grab(S / "geometry_features.py", ["TIPS", "FRET_TIPS", "UNIT", "NeckFinder", "neck_geometry", "HandFinder", "pick_fretting_hand", "neck_coords", "FRET_NUT_S", "FRET_G1", "OPEN_MAX_FRET", "MIN_ASPECT", "STRING_Y0", "STRING_D", "FRET_R", "fret_estimate", "fret_line_s", "fret_slot", "string_coord", "tab_features", "feature_vector", "frame_features"])
 LIB_STRUCT = grab(S / "neck_structure.py", ["RECT_H", "NOMINAL_Y0", "NOMINAL_D", "FRET_RATIO", "FIRST_GAP", "normalize_quad", "rectify", "_ridge", "find_strings", "find_frets"])
-LIB_LIVE = grab(S / "live_pipeline.py", ["TIP_IDS", "Pipeline", "structure_segments", "draw_overlay"])
+LIB_LIVE = grab(S / "live_pipeline.py", ["TIP_IDS", "Pipeline", "_to_image", "button_rect", "draw_structure", "draw_overlay"])
+LIB_KNN = grab(S / "live_pipeline.py", ["knn_distance"])
 LIVE_BLOCK = (
     "# ---- real-time pipeline (copied from scripts/live_pipeline.py; the same code runs in scripts/live_local.py)\n"
     + LIB_LIVE + "\n\n\n"
     "def new_pipeline():\n"
-    "    return Pipeline(NECK, HAND, CLF, COLS_M, META['smooth_k'], META['threshold'])\n\n\n")
-DIGEST = hashlib.sha1((LIB_NECK + LIB_GEO + LIB_STRUCT + LIB_LIVE).encode()).hexdigest()[:10]
+    "    return Pipeline(NECK, HAND, CLF, COLS_M, META['smooth_k'], META['threshold'], BUNDLE.get('novelty'))\n\n\n")
+DIGEST = hashlib.sha1((LIB_NECK + LIB_GEO + LIB_STRUCT + LIB_KNN + LIB_LIVE).encode()).hexdigest()[:10]
 
 # =====================================================================================================================
 md(r"""
@@ -101,10 +102,12 @@ RESUME = True                       # continue interrupted training from the las
 FORCE_FRAMES = FORCE_NECK = FORCE_FEATURES = FORCE_CLASSIFIER = False
 USE_PUBLIC_DATA = False             # optional experiment: add the public dataset's photos of the SAME chords (see section 7)
 SMOOTH_K = 5                        # the live answer averages the last K frames
+NOVELTY_KEEP = 0.93                 # accept this share of real chord frames; hand shapes more unfamiliar than that are refused ("not a chord I know")
 ABSTAIN_TARGET_ACC = 0.80           # the "not sure" threshold is the loosest one that reaches this accuracy in cross-validation
 OVERLAY_STRUCTURE = True            # draw the 6 strings and the frets on the demo video
 SEED = 0
 CODE_VERSION = 'v1'                 # bump to invalidate every cached stage
+FEATURE_CODE = 'v4-tab-features'    # bump when the hand/feature code changes: only the features and classifier are redone, not the neck training
 random.seed(SEED)
 print('settings loaded | chords:', CHORDS)
 """)
@@ -202,6 +205,7 @@ These three cells are the neck finder network, the hand-to-neck features, and th
 code("# ---- neck finder: network, soft-argmax, augmentation, prediction (from scripts/train_neck_detector.py)\n" + LIB_NECK)
 code("# ---- straightening, strings, frets (from scripts/neck_structure.py)\n" + LIB_STRUCT)
 code("# ---- hand finder, neck sanity check, hand points in neck coordinates (from scripts/geometry_features.py)\n" + LIB_GEO)
+code("# ---- distance that tells how familiar a hand shape is (from scripts/live_pipeline.py)\n" + LIB_KNN)
 
 md(r"""
 ## 4. Your data
@@ -364,11 +368,13 @@ print('neck finder and hand finder ready on', DEV)
 
 md(r"""
 ## 7. Finger positions for every frame
-For each video, every frame goes through: neck corners -> sanity check (a real neck is long, thin and convex) -> straighten -> MediaPipe hand -> 21 hand points in neck coordinates -> 42 numbers (21 across-neck positions and 21 along-neck positions relative to the fingertips' average). Results are saved **per video** in `WORK/cache/features/`, so an interrupted run only redoes the unfinished videos.
+For each video, every frame goes through the same stages as the live demo: **1. neck** (the neck finder gives the fretboard corners) -> sanity check (a real neck is long, thin and convex) -> straighten -> **2. strings and frets** (the 6 strings and the numbered fret lines, computed from the neck geometry) -> **3. fingertips** (MediaPipe finds the fretting hand, the nearest-to-the-nut hand that touches the neck) -> **4. the tab**: each fretting fingertip (index, middle, ring, little) gets a *string number* and a *fret number*. The chord is decided from those 8 numbers only (section 8). Results are saved **per video** in `WORK/cache/features/`, so an interrupted run only redoes the unfinished videos.
+- Accuracy of the numbers (checked on frames where the nut and frets were clicked by hand): each fingertip's fret is exactly right about 68% of the time and within one fret 95% of the time. The strings are placed from the typical string layout inside the neck outline.
+- The strings and frets drawn in the demo videos come from the same geometry, so what you see is what the classifier used.
 """)
 code(r"""
 FEAT = WORK / 'cache' / 'features'
-feat_fp = fingerprint('features', CODE_VERSION, file_sig(NECK_MODEL), FRAME_STEP_S)
+feat_fp = fingerprint('features', CODE_VERSION, FEATURE_CODE, file_sig(NECK_MODEL), FRAME_STEP_S)
 
 
 def video_features(vid):
@@ -378,7 +384,7 @@ def video_features(vid):
         z = np.load(path, allow_pickle=True)
         if str(z['fp']) == feat_fp: return z
     frames = sorted((FRAMES / chord).glob(f'{chord}_{take}_*.jpg')); n = len(frames)
-    ids = []; feat = np.full((n, 42), np.nan); nv = np.zeros(n, bool); hf = np.zeros(n, bool); ins = np.full(n, np.nan); cor = np.zeros((n, 4, 2))
+    ids = []; feat = np.full((n, 55), np.nan); nv = np.zeros(n, bool); hf = np.zeros(n, bool); ins = np.full(n, np.nan); cor = np.zeros((n, 4, 2))
     for i, f in enumerate(frames):
         r = frame_features(cv2.imread(str(f)), NECK, HAND)
         ids.append(f.stem); nv[i] = r['neck_valid']; hf[i] = r['hand_found']; ins[i] = r['inside']; cor[i] = r['corners']
@@ -393,7 +399,7 @@ for v in VIDEOS:
     for i, fid in enumerate(z['ids']):
         rows.append(dict(id=str(fid), chord=v.parent.name, take=v.stem, frame=i, usable=bool(np.isfinite(z['feat'][i]).all()),
                          neck_valid=bool(z['neck_valid'][i]), hand_found=bool(z['hand_found'][i]),
-                         **{f'f{j}': float(z['feat'][i][j]) for j in range(42)}))
+                         **{f'f{j}': float(z['feat'][i][j]) for j in range(55)}))
 ALL = pd.DataFrame(rows)
 mark_done('features', feat_fp)
 print(f'{len(ALL)} frames, {int(ALL.usable.sum())} usable ({100 * ALL.usable.mean():.0f}%) in {time.time() - t0:.0f}s')
@@ -403,7 +409,9 @@ print(ALL.groupby('chord').agg(takes=('take', 'nunique'), frames=('id', 'size'),
 
 md(r"""
 ## 8. The chord classifier (choose by honest testing, then save)
-**How the choice is made:** every combination of *feature set* (across-neck only, fingertips only, across + along), *model* (random forest, logistic regression, nearest neighbours) and *jitter augmentation* (on or off) is tested with **leave-one-take-out cross-validation**: train on the other takes, test on the take that was held out, repeat for each take. Nothing is ever tested on frames it trained on. The best combination is retrained on all takes and saved.
+**What the classifier sees:** only the *tab* of the fretting hand: the string number and the fret number of each of the four fretting fingertips (8 numbers). Not the room, not the photo style, not the general hand shape.
+
+**How the choice is made:** every combination of *model* (random forest, logistic regression, nearest neighbours) and *jitter augmentation* (on or off) is tested with **leave-one-take-out cross-validation**: train on the other takes, test on the take that was held out, repeat for each take. Nothing is ever tested on frames it trained on. The best combination is retrained on all takes and saved.
 - **Frame averaging:** the answer averages the probabilities of the last `SMOOTH_K` frames of a sequence.
 - **"Not sure" threshold:** the loosest confidence threshold at which the answered frames reach `ABSTAIN_TARGET_ACC` in cross-validation (at least 30% of frames answered).
 """)
@@ -416,23 +424,23 @@ from sklearn.pipeline import make_pipeline
 import joblib
 
 TIP_IDX = [4, 8, 12, 16, 20]
-FEATURE_SETS = {'across-neck, all 21 points': list(range(21)), 'across-neck, 5 fingertips': TIP_IDX,
-                'across + along, 5 fingertips': TIP_IDX + [21 + i for i in TIP_IDX], 'across + along, all 21 points': list(range(42))}
-MODELS = {'random forest': lambda: RandomForestClassifier(300, random_state=SEED, min_samples_leaf=2, n_jobs=-1),
+FEATURE_SETS = {'tab: string + fret of the 4 fretting fingertips': list(range(47, 55))}     # THE chord decision uses only where each fingertip is: string number and fret number
+TAB_COLS = {f'f{47 + i}' for i in range(8)}                  # string and fret numbers are only known to about half a unit
+MODELS = {'random forest': lambda: RandomForestClassifier(100, random_state=SEED, min_samples_leaf=2, n_jobs=-1),
           'logistic regression': lambda: make_pipeline(StandardScaler(), LogisticRegression(C=0.5, max_iter=5000)),
           'nearest neighbours': lambda: make_pipeline(StandardScaler(), KNeighborsClassifier(5))}
 U = ALL[ALL.usable & ALL.chord.isin(CHORDS)].reset_index(drop=True)
 CLASSES = sorted(U.chord.unique())
-FCOLS = [f'f{j}' for j in range(42)]
+FCOLS = [f'f{j}' for j in range(55)]
 print(f'{len(U)} usable frames, {len(CLASSES)} chords, chance = {100 / len(CLASSES):.0f}%')
 
 
 def augment_rows(X, y, times=3, sigma=0.03, seed=SEED):
-    r = np.random.default_rng(seed); return np.vstack([X] + [X + r.normal(0, sigma, X.shape) for _ in range(times)]), np.concatenate([y] * (times + 1))
+    r = np.random.default_rng(seed); sigma = np.broadcast_to(np.asarray(sigma, float), (X.shape[1],)); return np.vstack([X] + [X + r.normal(0, sigma, X.shape) for _ in range(times)]), np.concatenate([y] * (times + 1))
 
 
-def fit_model(mname, X, y, jitter):
-    if jitter: X, y = augment_rows(X, y)
+def fit_model(mname, X, y, jitter, cols=None):
+    if jitter: X, y = augment_rows(X, y, sigma=[0.25 if c in TAB_COLS else 0.03 for c in cols] if cols else 0.03)      # string and fret numbers are only known to about half a unit
     return MODELS[mname]().fit(X, y)
 
 
@@ -453,14 +461,14 @@ def cross_validate(fset, mname, jitter, extra=None):
         if not te.any(): continue
         Xtr, ytr = U.loc[tr, cols].values, U.loc[tr, 'chord'].values
         if extra is not None: Xtr, ytr = np.vstack([Xtr, extra[cols].values]), np.concatenate([ytr, extra['chord'].values])
-        m = fit_model(mname, Xtr, ytr, jitter); pr = m.predict_proba(U.loc[te, cols].values)
+        m = fit_model(mname, Xtr, ytr, jitter, cols); pr = m.predict_proba(U.loc[te, cols].values)
         P[np.where(te)[0][:, None], [CLASSES.index(c) for c in m.classes_]] = pr
     groups = (U.chord + '_' + U['take']).values; y = U.chord.values
     acc1 = float(np.mean(np.array(CLASSES)[P.argmax(1)] == y))
     return P, acc1, smooth_accuracy(P, y, groups, SMOOTH_K), groups
 
 
-clf_fp = fingerprint('clf', CODE_VERSION, feat_fp, SMOOTH_K, ABSTAIN_TARGET_ACC, USE_PUBLIC_DATA, len(U))
+clf_fp = fingerprint('clf', CODE_VERSION, feat_fp, SMOOTH_K, ABSTAIN_TARGET_ACC, NOVELTY_KEEP, USE_PUBLIC_DATA, len(U))
 CLF_PATH, META_PATH = WORK / 'models' / 'chord_clf.joblib', WORK / 'models' / 'chord_meta.json'
 if stage_is_done('classifier', clf_fp, [CLF_PATH, META_PATH], FORCE_CLASSIFIER):
     BUNDLE = joblib.load(CLF_PATH); META = json.loads(META_PATH.read_text())
@@ -487,14 +495,21 @@ else:
         keep = Pa.max(1) >= th
         if keep.mean() >= 0.30 and np.mean(np.array(CLASSES)[Pa.argmax(1)][keep] == y[keep]) >= ABSTAIN_TARGET_ACC: thr, cov_at = float(th), float(keep.mean()); break
     cols = [FCOLS[i] for i in FEATURE_SETS[best['features']]]
-    final = fit_model(best['model'], U[cols].values, U.chord.values, best['jitter'])
+    final = fit_model(best['model'], U[cols].values, U.chord.values, best['jitter'], cols)
     META = dict(features=best['features'], model=best['model'], jitter=bool(best['jitter']), columns=cols, classes=CLASSES, smooth_k=SMOOTH_K,
                 threshold=thr, coverage_at_threshold=cov_at, cv_per_frame=best['per_frame'], cv_averaged=best['averaged'], target_acc=ABSTAIN_TARGET_ACC)
-    BUNDLE = dict(model=final, meta=META)
+    # unfamiliar-shape check: distance of each held-out frame to the nearest training frames of the OTHER takes
+    Xall = U[cols].values.astype(float); tk = U['take'].values; din = np.zeros(len(U))
+    for t_ in np.unique(tk):
+        te_ = tk == t_; tr_ = ~te_; din[te_] = knn_distance(Xall[te_], Xall[tr_], Xall[tr_].mean(0), Xall[tr_].std(0) + 1e-6, 5)
+    nthr = float(np.percentile(din, 100 * NOVELTY_KEEP)); kept = din <= nthr; hit = np.array(CLASSES)[P.argmax(1)] == y
+    print(f"unfamiliar-shape check: keeps {100 * kept.mean():.0f}% of real held-out frames (accuracy of those {100 * hit[kept].mean():.1f}% vs {100 * hit.mean():.1f}% overall); shapes further than {nthr:.2f} from every trained chord get no answer")
+    NOVELTY = dict(ref=Xall, mean=Xall.mean(0), std=Xall.std(0) + 1e-6, k=5, thr=nthr); META.update(novelty_keep=NOVELTY_KEEP, novelty_thr=nthr)
+    BUNDLE = dict(model=final, meta=META, novelty=NOVELTY)
     joblib.dump(BUNDLE, CLF_PATH); META_PATH.write_text(json.dumps(META, indent=1)); mark_done('classifier', clf_fp)
     OOF = dict(P=P, Pa=Pa, y=y, groups=groups, take=U['take'].values)
     print(f"\nCHOSEN: {best['features']} + {best['model']} + jitter {best['jitter']} | not-sure threshold {thr:.2f} (answers {100 * cov_at:.0f}% of frames at >= {100 * ABSTAIN_TARGET_ACC:.0f}% accuracy)" if thr > 0 else
-          f"\nCHOSEN: {best['features']} + {best['model']} + jitter {best['jitter']} | the {100 * ABSTAIN_TARGET_ACC:.0f}% target is not reachable, so no 'not sure' threshold is applied")
+          f"\nCHOSEN: {best['features']} + {best['model']} + jitter {best['jitter']} | {('the averaged accuracy already reaches the ' + format(100 * ABSTAIN_TARGET_ACC, '.0f') + '% target, so no') if best['averaged'] >= ABSTAIN_TARGET_ACC else ('the ' + format(100 * ABSTAIN_TARGET_ACC, '.0f') + '% target is not reachable, so no')} 'not sure' threshold is applied")
     print('saved:', CLF_PATH.name, META_PATH.name)
 """)
 
@@ -531,7 +546,7 @@ if USE_PUBLIC_DATA:
     if gain >= 0.01 and not META.get('uses_public_data'):
         cols_p = META['columns']
         Xp = np.vstack([U[cols_p].values, PUBLIC[cols_p].values]); yp = np.concatenate([U.chord.values, PUBLIC.chord.values])
-        BUNDLE = dict(model=fit_model(META['model'], Xp, yp, META['jitter']), meta=META)
+        BUNDLE = dict(model=fit_model(META['model'], Xp, yp, META['jitter'], cols_p), meta=META, novelty=BUNDLE.get('novelty'))
         META.update(uses_public_data=True, cv_per_frame=a_pub, cv_averaged=k_pub, public_photos=int(len(PUBLIC)))
         joblib.dump(BUNDLE, CLF_PATH); META_PATH.write_text(json.dumps(META, indent=1))
         CLF = BUNDLE['model']

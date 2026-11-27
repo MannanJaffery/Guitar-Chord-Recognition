@@ -32,7 +32,8 @@ notebooks/05_chord_recognizer_colab.ipynb  ONE self-contained Colab/Kaggle noteb
 scripts/make_colab_notebook.py           regenerates notebook 05 (copies its library code out of the three scripts below)
 scripts/package_for_colab.py             zips your videos + neck labels (+ neck_v1.pt) into artifacts/colab_upload/own_data.zip for upload
 scripts/label_neck.py                    local click tool: mark the 4 corners of the fretboard on frames
-scripts/live_local.py, live_pipeline.py  live chord recognition on your own laptop (webcam or video file); live_pipeline.py is shared with notebook 05
+scripts/live_local.py, live_pipeline.py  live chord recognition on your own laptop (webcam or video file; click the on-screen button or press s to show/hide the strings and numbered frets); live_pipeline.py is shared with notebook 05
+scripts/prepare_fret_labels.py, label_frets.py   pick frames and click the nut + fret lines by hand (used to calibrate the fret numbers)
 requirements-live.txt                    packages for a local Python environment that runs the live script
 scripts/train_neck_detector.py, geometry_features.py, neck_structure.py   neck finder, hand-in-neck-coordinates features, strings/frets (library for notebook 05)
 scripts/export_images.py                 dataset -> data/images/<split>/<chord>/*.jpg
